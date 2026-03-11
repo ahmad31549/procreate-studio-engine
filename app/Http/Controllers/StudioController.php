@@ -57,6 +57,7 @@ class StudioController extends Controller
 
     public function getStorageStats()
     {
+        Log::info("GetStorageStats requested");
         $usedBytes = $this->getUsedStorageBytes();
         $limitBytes = $this->limitMB * 1024 * 1024;
         $remainingBytes = max(0, $limitBytes - $usedBytes);
