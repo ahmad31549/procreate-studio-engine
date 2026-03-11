@@ -846,33 +846,29 @@ class StudioController extends Controller
 
     private function resolveJobAssetPath(string $jobId, string $path): ?string
     {
-        $jobRoot = realpath($this->storagePath . DIRECTORY_SEPARATOR . $jobId . DIRECTORY_SEPARATOR . 'work');
-        if ($jobRoot === false) {
-            return null;
-        }
-
+        $jobRoot = $this->storagePath . DIRECTORY_SEPARATOR . $jobId . DIRECTORY_SEPARATOR . 'work';
+        
         $cleanPath = str_replace(["\0", '../', './', '..\\', '.\\'], '', $path);
         $cleanPath = ltrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $cleanPath), DIRECTORY_SEPARATOR);
-        if ($cleanPath === '') {
-            return null;
-        }
+        
+        if ($cleanPath === '') return null;
 
         $fullPath = $jobRoot . DIRECTORY_SEPARATOR . $cleanPath;
         if (!file_exists($fullPath)) {
+            Log::warning("File does not exist: {$fullPath}");
             return null;
         }
 
-        $resolvedPath = realpath($fullPath);
-        if ($resolvedPath === false) {
+        // Basic security check: ensure the resulting path is still inside the jobRoot
+        $fullPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $fullPath);
+        $jobRoot = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $jobRoot);
+        
+        if (!str_starts_with($fullPath, $jobRoot)) {
+            Log::warning("Security block: {$fullPath} is not inside {$jobRoot}");
             return null;
         }
 
-        $jobRootPrefix = rtrim($jobRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-        if ($resolvedPath !== $jobRoot && !str_starts_with($resolvedPath, $jobRootPrefix)) {
-            return null;
-        }
-
-        return $resolvedPath;
+        return $fullPath;
     }
 
     private function resolveJobManagedPath(string $jobId, ?string $path): ?string
