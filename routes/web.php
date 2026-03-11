@@ -5,7 +5,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-// Group for Authenticated Users
+// Group for Authenticated Users (Requires Verification)
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/', function () {
         return view('selection');
@@ -28,14 +28,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // Etsy PDF Lab Routes
-    Route::middleware(['auth'])->group(function () {
-        Route::get('/studio/pdf', [\App\Http\Controllers\PdfGeneratorController::class, 'index'])->name('pdf.index');
-        Route::get('/studio/pdf/new', [\App\Http\Controllers\PdfGeneratorController::class, 'create'])->name('pdf.create');
-        Route::get('/studio/pdf/edit/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'edit'])->name('pdf.edit');
-        Route::post('/studio/pdf/save', [\App\Http\Controllers\PdfGeneratorController::class, 'save'])->name('pdf.save');
-        Route::delete('/studio/pdf/delete/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'destroy'])->name('pdf.delete');
-        Route::get('/studio/pdf/preview/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'preview'])->name('pdf.preview');
-    });
+    Route::get('/studio/pdf', [\App\Http\Controllers\PdfGeneratorController::class, 'index'])->name('pdf.index');
+    Route::get('/studio/pdf/new', [\App\Http\Controllers\PdfGeneratorController::class, 'create'])->name('pdf.create');
+    Route::get('/studio/pdf/edit/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'edit'])->name('pdf.edit');
+    Route::post('/studio/pdf/save', [\App\Http\Controllers\PdfGeneratorController::class, 'save'])->name('pdf.save');
+    Route::delete('/studio/pdf/delete/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'destroy'])->name('pdf.delete');
+    Route::get('/studio/pdf/preview/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'preview'])->name('pdf.preview');
 
     // Admin Routes
     Route::middleware(['can:admin'])->group(function () {
@@ -45,8 +43,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/admin/users/{id}/reset-password', [\App\Http\Controllers\AdminController::class, 'resetPassword'])->name('admin.users.password');
         Route::delete('/admin/users/{id}', [\App\Http\Controllers\AdminController::class, 'deleteUser'])->name('admin.users.delete');
     });
+});
 
-    // Procreate Studio Engine Routes (Ported from PHP)
+// Studio Engine Routes (Auth only, skip 'verified' to ensure AJAX works for everyone)
+Route::middleware(['auth'])->group(function () {
     Route::prefix('studio-engine')->group(function () {
         Route::post('/upload', [\App\Http\Controllers\StudioController::class, 'upload']);
         Route::post('/upload-chunk', [\App\Http\Controllers\StudioController::class, 'uploadChunk']);
