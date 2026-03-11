@@ -474,28 +474,6 @@
     </section>
 </div>
 
-<!-- Maintenance Tools -->
-<div class="studio-card fade-in" style="max-width: 1000px; margin: 24px auto 0; border: 1px solid rgba(239, 68, 68, 0.15); background: rgba(239, 68, 68, 0.02);">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: 12px; font-size: 1.5rem; display: flex; align-items: center; justify-content: center;">
-                🧹
-            </div>
-            <div>
-                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: var(--text-main);">Storage Management</h3>
-                <p class="drop-subtext" style="margin-top: 4px; margin-bottom: 0; font-size: 0.85rem;">Clear temporary files and maintain system performance.</p>
-            </div>
-        </div>
-        <button type="button" id="cleanupBtn" class="btn btn-secondary" style="border-color: rgba(239, 68, 68, 0.3); color: #ef4444; font-weight: 800;">Clear Memory</button>
-    </div>
-    
-    <div id="cleanupProgressWrap" style="display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(239, 68, 68, 0.1);">
-        <div class="progress-track" style="margin: 0 0 12px 0; background: rgba(0,0,0,0.3);">
-            <div id="cleanupProgressFill" class="progress-bar" style="width: 0%; background: #ef4444;"></div>
-        </div>
-        <p id="cleanupFeedback" class="drop-subtext" style="font-size: 0.8rem; color: #ef4444; font-weight: 600; m-0"></p>
-    </div>
-</div>
 @endsection
 
 @push('scripts')

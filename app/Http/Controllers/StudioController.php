@@ -554,6 +554,7 @@ class StudioController extends Controller
 
     public function rebrand(Request $request, $jobId)
     {
+        @set_time_limit(600); // Increase timeout for repackaging
         $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
@@ -642,6 +643,7 @@ class StudioController extends Controller
         $total = count($job->files ?: []);
         
         foreach ($job->files as $index => $source) {
+            Log::info("Rebranding file " . ($index+1) . " of $total: " . $source['name']);
             $this->updateJob($jobId, ['progress_message' => "Processing " . ($index+1) . "/$total..."]);
             
             $sourceStem = pathinfo($source['name'], PATHINFO_FILENAME);
