@@ -505,7 +505,7 @@
     const shouldRetryWithFallback = (status) => [404, 500, 502, 503, 504].includes(status);
 
     // Point to local Laravel engine by default
-    const LARAVEL_ENGINE_BASE = '/studio-engine';
+    const LARAVEL_ENGINE_BASE = '{{ url("/studio-engine") }}';
     let activeApiBase = LARAVEL_ENGINE_BASE;
 
     function getApiBases() {
