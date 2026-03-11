@@ -473,9 +473,13 @@ class StudioController extends Controller
     public function previewAsset(Request $request, $jobId)
     {
         $path = $request->query('path');
+        Log::info("Preview request for job {$jobId}, path: {$path}");
+        
         if (!$path) return response()->json(['error' => 'No path provided'], 400);
 
         $fullPath = $this->resolveJobAssetPath($jobId, $path);
+        Log::info("Resolved path: " . ($fullPath ?: 'NULL'));
+        
         if (!$fullPath) {
             Log::warning("Preview failed: File not found for job {$jobId} path {$path}");
             return response()->json(['error' => 'File not found'], 404);
