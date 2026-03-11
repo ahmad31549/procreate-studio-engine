@@ -568,7 +568,7 @@
         return formData;
     }
 
-    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB Chunks
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB Chunks
 
     async function uploadWithChunks(files) {
         const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).substring(2);

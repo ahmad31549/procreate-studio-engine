@@ -43,10 +43,16 @@ class StudioController extends Controller
 
     private function checkStorageLimit()
     {
-        $used = $this->getUsedStorageBytes();
-        $limit = $this->limitMB * 1024 * 1024;
-        Log::info("Storage Check: Used " . round($used / 1024 / 1024, 2) . "MB / Limit " . $this->limitMB . "MB");
-        return $used < $limit;
+        Log::info("Storage Limit Check starting...");
+        try {
+            $used = $this->getUsedStorageBytes();
+            $limit = $this->limitMB * 1024 * 1024;
+            Log::info("Storage Check: Used " . round($used / 1024 / 1024, 2) . "MB / Limit " . $this->limitMB . "MB");
+            return $used < $limit;
+        } catch (\Exception $e) {
+            Log::error("Failed to calculate storage usage: " . $e->getMessage());
+            return true; // Allow upload if check fails to be safe, or false to be strict
+        }
     }
 
     public function getStorageStats()
