@@ -365,6 +365,7 @@ class StudioController extends Controller
         if (!$job) return response()->json(['error' => 'Job not found'], 404);
 
         $extractRoot = $this->storagePath . '/' . $jobId . '/work';
+        Log::info("Scan starting. Extraction root: {$extractRoot}");
         if (file_exists($extractRoot)) {
             File::deleteDirectory($extractRoot);
         }

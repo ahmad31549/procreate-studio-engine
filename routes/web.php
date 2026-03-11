@@ -19,7 +19,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('studio.procreate');
 
     Route::get('/setting', function () {
-        $records = App\Models\PdfRecord::where('user_id', Illuminate\Support\Facades\Auth::id())->latest()->get();
+        $records = \App\Models\PdfRecord::where('user_id', auth()->id())->latest()->get();
         return view('dashboard', compact('records'));
     })->name('dashboard');
 
