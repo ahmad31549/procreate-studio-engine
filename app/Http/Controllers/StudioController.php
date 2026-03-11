@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
-use App\Models\StudioJob;
+// use App\Models\StudioJob; // Removed to use file-based storage
 use Symfony\Component\Process\Process;
 use ZipArchive;
 
@@ -38,11 +38,11 @@ class StudioController extends Controller
         $files = $request->file('files');
         if (!$files) return response()->json(['error' => 'No files provided'], 400);
 
-        // 5GB Limit Check (5 * 1024 * 1024 * 1024 bytes)
+        // Limit Check
         $totalSize = 0;
         foreach($files as $f) { $totalSize += $f->getSize(); }
-        if ($totalSize > 5368709120) {
-            return response()->json(['error' => 'Total upload exceeds 5GB limit. Please upload smaller batches.'], 413);
+        if ($totalSize > 10737418240) {
+            return response()->json(['error' => 'Total upload exceeds 10GB limit.'], 413);
         }
 
         $savedFiles = [];
@@ -56,7 +56,7 @@ class StudioController extends Controller
             ];
         }
 
-        StudioJob::create([
+        $this->updateJob($jobId, [
             'job_id' => $jobId,
             'user_id' => Auth::id(),
             'status' => 'uploaded',
@@ -68,9 +68,74 @@ class StudioController extends Controller
 
         return response()->json([
             'job_id' => $jobId,
-            'files_count' => count($savedFiles),
             'status' => 'uploaded'
         ]);
+    }
+
+    public function uploadChunk(Request $request)
+    {
+        $jobId = $request->input('job_id');
+        $fileName = $request->input('file_name');
+        $chunkIndex = (int) $request->input('chunk_index');
+        $totalChunks = (int) $request->input('total_chunks');
+        $file = $request->file('chunk');
+
+        if (!$jobId || !$fileName || !$file) {
+            return response()->json(['error' => 'Missing data'], 400);
+        }
+
+        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
+
+        $tempPath = $jobDir . '/' . $fileName . '.part';
+        
+        // Append chunk to the file
+        $out = fopen($tempPath, $chunkIndex === 0 ? 'wb' : 'ab');
+        fwrite($out, file_get_contents($file->getRealPath()));
+        fclose($out);
+
+        if ($chunkIndex === $totalChunks - 1) {
+            // Last chunk, rename to original
+            $finalPath = $jobDir . '/' . $fileName;
+            @rename($tempPath, $finalPath);
+            return response()->json(['status' => 'chunk_saved', 'completed' => true]);
+        }
+
+        return response()->json(['status' => 'chunk_saved', 'completed' => false]);
+    }
+
+    public function finalizeUpload(Request $request)
+    {
+        $jobId = $request->input('job_id');
+        if (!$jobId) return response()->json(['error' => 'Job ID required'], 400);
+
+        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        if (!file_exists($jobDir)) return response()->json(['error' => 'Upload dir not found'], 404);
+
+        $files = File::files($jobDir);
+        $savedFiles = [];
+        foreach ($files as $file) {
+            if (str_ends_with($file->getFilename(), '.part')) continue;
+            if (basename($file->getFilename()) === 'job.json') continue;
+            
+            $savedFiles[] = [
+                'name' => $file->getFilename(),
+                'path' => $file->getRealPath(),
+                'size' => $file->getSize()
+            ];
+        }
+
+        $this->updateJob($jobId, [
+            'job_id' => $jobId,
+            'user_id' => Auth::id(),
+            'status' => 'uploaded',
+            'files' => $savedFiles,
+            'progress' => 0
+        ]);
+
+        $this->purgeOldJobs();
+
+        return response()->json(['status' => 'uploaded', 'job_id' => $jobId]);
     }
 
     /**
@@ -84,8 +149,9 @@ class StudioController extends Controller
         foreach ($folders as $folder) {
             if (filemtime($folder) < $oneHourAgo) {
                 File::deleteDirectory($folder);
-                $jobId = basename($folder);
-                StudioJob::where('job_id', $jobId)->delete();
+                // No need to delete from DB anymore, file is in the folder being deleted
+                // $jobId = basename($folder);
+                // StudioJob::where('job_id', $jobId)->delete();
             }
         }
     }
@@ -108,8 +174,8 @@ class StudioController extends Controller
             // 1. HEAD request to check size before downloading
             $headResponse = Http::timeout(10)->head($url);
             $contentLength = $headResponse->header('Content-Length');
-            if ($contentLength && $contentLength > 5368709120) {
-                return response()->json(['error' => 'The cloud file is too large (>5GB).'], 413);
+            if ($contentLength && $contentLength > 10737418240) {
+                return response()->json(['error' => 'The cloud file is too large (>10GB).'], 413);
             }
 
             if (preg_match('/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|docs\.google\.com\/uc\?id=)([\w-]+)/', $url, $matches)) {
@@ -139,7 +205,7 @@ class StudioController extends Controller
             $filePath = $jobDir . '/' . $filename;
             file_put_contents($filePath, $response->body());
 
-            StudioJob::create([
+            $this->updateJob($jobId, [
                 'job_id' => $jobId,
                 'user_id' => Auth::id(),
                 'status' => 'uploaded',
@@ -163,7 +229,7 @@ class StudioController extends Controller
      */
     public function saveConfig(Request $request, $jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) return response()->json(['error' => 'Job not found'], 404);
 
         $confDir = $this->storagePath . '/' . $jobId . '/config';
@@ -178,7 +244,7 @@ class StudioController extends Controller
             'final_zip_name'=> $finalZipName,
         ];
 
-        $userDir = $this->storagePath . '/users/' . auth()->id();
+        $userDir = $this->storagePath . '/users/' . Auth::id();
         if (!file_exists($userDir)) @mkdir($userDir, 0755, true);
 
         file_put_contents($userDir . '/prefs.json', json_encode([
@@ -205,7 +271,7 @@ class StudioController extends Controller
             $updateData['sig_pic_path'] = $sigPath;
         }
 
-        $job->update($updateData);
+        $this->updateJob($jobId, $updateData);
 
         return response()->json([
             'status'         => 'config_saved',
@@ -220,7 +286,7 @@ class StudioController extends Controller
      */
     public function scan(Request $request, $jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) return response()->json(['error' => 'Job not found'], 404);
 
         $extractRoot = $this->storagePath . '/' . $jobId . '/original';
@@ -259,8 +325,8 @@ class StudioController extends Controller
             }
             $totalExtractedSize += $currentExtractedSize;
 
-            if ($totalExtractedSize > 5368709120) { // 5GB Total Limit
-                return response()->json(['error' => 'Total content exceeds 5GB limit.'], 413);
+            if ($totalExtractedSize > 10737418240) { // 10GB Total Limit
+                return response()->json(['error' => 'Total content exceeds 10GB limit.'], 413);
             }
 
             $authorsInFile = [];
@@ -317,7 +383,7 @@ class StudioController extends Controller
         
         Log::info("Job {$jobId} scan complete. Found " . count($manifest['assets']) . " assets and " . count($manifest['detected_authors']) . " author tags.");
 
-        $job->update([
+        $this->updateJob($jobId, [
             'status' => 'scanned',
             'manifest' => $manifest,
             'progress' => 100
@@ -360,7 +426,7 @@ class StudioController extends Controller
 
     public function downloadOutput(Request $request, $jobId, $index)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
@@ -384,7 +450,7 @@ class StudioController extends Controller
 
     public function downloadJob(Request $request, $jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
@@ -408,12 +474,12 @@ class StudioController extends Controller
 
     public function rebrand(Request $request, $jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
 
-        $userDir = $this->storagePath . '/users/' . auth()->id();
+        $userDir = $this->storagePath . '/users/' . Auth::id();
         if (!file_exists($userDir)) @mkdir($userDir, 0755, true);
 
         $storeNameInput = trim((string) $request->input('store_name', ''));
@@ -427,6 +493,7 @@ class StudioController extends Controller
                 if (!$authorNameInput && !empty($prefs['author_name'])) $authorNameInput = $prefs['author_name'];
                 if (!$finalZipNameInput && !empty($prefs['final_zip_name'])) $finalZipNameInput = $prefs['final_zip_name'];
             } else {
+                /*
                 $lastJob = StudioJob::where('user_id', auth()->id())
                     ->whereNotNull('store_name')
                     ->where('store_name', '!=', '')
@@ -438,6 +505,7 @@ class StudioController extends Controller
                     if (!$authorNameInput) $authorNameInput = $lastJob->author_name;
                     if (!$finalZipNameInput) $finalZipNameInput = $lastJob->final_zip_name;
                 }
+                */
             }
         }
 
@@ -494,7 +562,7 @@ class StudioController extends Controller
         $total = count($job->files ?: []);
         
         foreach ($job->files as $index => $source) {
-            $job->update(['progress_message' => "Processing " . ($index+1) . "/$total..."]);
+            $this->updateJob($jobId, ['progress_message' => "Processing " . ($index+1) . "/$total..."]);
             
             $sourceStem = pathinfo($source['name'], PATHINFO_FILENAME);
             $sourceExtractPath = $this->storagePath . '/' . $jobId . '/original/' . $sourceStem;
@@ -544,7 +612,7 @@ class StudioController extends Controller
             File::deleteDirectory($this->storagePath . '/' . $jobId . '/uploads');
         }
 
-        $job->update([
+        $this->updateJob($jobId, [
             'status' => 'completed',
             'outputs' => $rebrandedFiles,
             'bundle' => $bundle,
@@ -564,7 +632,7 @@ class StudioController extends Controller
 
     public function renameOutput(Request $request, $jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
@@ -617,7 +685,7 @@ class StudioController extends Controller
             
             $bundle = $this->buildOutputBundle($jobId, $outputs, $job->final_zip_name . '.zip');
 
-            $job->update([
+            $this->updateJob($jobId, [
                 'outputs' => $outputs,
                 'bundle' => $bundle
             ]);
@@ -632,7 +700,7 @@ class StudioController extends Controller
 
     public function getStatus($jobId)
     {
-        $job = StudioJob::where('job_id', $jobId)->first();
+        $job = $this->getJob($jobId);
         return response()->json($job ?: ['error' => 'Job not found'], $job ? 200 : 404);
     }
 
@@ -651,7 +719,8 @@ class StudioController extends Controller
                 File::deleteDirectory($folder);
             }
         }
-        StudioJob::truncate();
+        // No need to truncate anymore as they are all files
+        // StudioJob::truncate();
         return response()->json(['status' => 'success', 'message' => 'All temporary storage cleared.']);
     }
 
@@ -742,7 +811,7 @@ class StudioController extends Controller
         return $resolvedPath;
     }
 
-    private function resolveJobDownloadTarget(StudioJob $job): ?array
+    private function resolveJobDownloadTarget(object $job): ?array
     {
         $jobId = (string) $job->job_id;
         $bundle = $job->bundle;
@@ -771,7 +840,7 @@ class StudioController extends Controller
             $bundleName = is_array($bundle) && !empty($bundle['name']) ? (string) $bundle['name'] : 'rebranded_pack.zip';
             $generatedBundle = $this->buildOutputBundle($jobId, $outputs, $bundleName);
             if ($generatedBundle) {
-                $job->update(['bundle' => $generatedBundle]);
+                $this->updateJob($jobId, ['bundle' => $generatedBundle]);
 
                 return [
                     'name' => $generatedBundle['name'],
@@ -842,7 +911,8 @@ class StudioController extends Controller
             File::deleteDirectory($jobPath);
         }
 
-        StudioJob::where('job_id', $jobId)->delete();
+        // No record to delete, directory already gone
+        // StudioJob::where('job_id', $jobId)->delete();
     }
 
     private function buildAuthorReplacementMap(array $authors, string $newAuthor): array
@@ -1484,5 +1554,21 @@ PY;
             }
         }
         $zip->close();
+    }
+
+    private function getJob($jobId) {
+        $path = $this->storagePath . '/' . $jobId . '/job.json';
+        if (!file_exists($path)) return null;
+        $data = json_decode(file_get_contents($path), true);
+        return $data ? (object)$data : null;
+    }
+
+    private function updateJob($jobId, $data) {
+        $job = (array)($this->getJob($jobId) ?? []);
+        $job = array_merge($job, $data);
+        $path = $this->storagePath . '/' . $jobId . '/job.json';
+        if (!file_exists(dirname($path))) @mkdir(dirname($path), 0755, true);
+        file_put_contents($path, json_encode($job, JSON_PRETTY_PRINT));
+        return (object)$job;
     }
 }

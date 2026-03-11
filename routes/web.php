@@ -49,6 +49,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Procreate Studio Engine Routes (Ported from PHP)
     Route::prefix('studio-engine')->group(function () {
         Route::post('/upload', [\App\Http\Controllers\StudioController::class, 'upload']);
+        Route::post('/upload-chunk', [\App\Http\Controllers\StudioController::class, 'uploadChunk']);
+        Route::post('/finalize-upload', [\App\Http\Controllers\StudioController::class, 'finalizeUpload']);
         Route::post('/upload-url', [\App\Http\Controllers\StudioController::class, 'uploadUrl']);
         Route::post('/jobs/{jobId}/scan', [\App\Http\Controllers\StudioController::class, 'scan']);
         Route::post('/jobs/{jobId}/save-config', [\App\Http\Controllers\StudioController::class, 'saveConfig']);

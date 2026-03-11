@@ -484,43 +484,48 @@
         return formData;
     }
 
-    async function uploadWithFallback(files) {
-        let lastResponse = null;
-        let lastError = null;
+    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB Chunks
+
+    async function uploadWithChunks(files) {
+        const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
         const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+        let uploadedBytes = 0;
         const startTime = Date.now();
 
-        // Initialize display stats
-        if (elements.statFiles) elements.statFiles.innerText = `0 / ${files.length}`;
-        if (elements.statTransferred) elements.statTransferred.innerText = `0 B / ${formatFileSize(totalSize)}`;
-        if (elements.statSpeed) elements.statSpeed.innerText = "Starting...";
-        if (elements.statEta) elements.statEta.innerText = "Calculating...";
+        for (const file of files) {
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(file.size, start + CHUNK_SIZE);
+                const chunk = file.slice(start, end);
 
-        for (const [index, base] of getApiBases().entries()) {
-            if (index > 0 && elements.stageMessage) {
-                elements.stageMessage.innerText = 'Primary API failed. Retrying with backup backend...';
-            }
+                const formData = new FormData();
+                formData.append('job_id', jobId);
+                formData.append('file_name', file.name);
+                formData.append('chunk_index', i);
+                formData.append('total_chunks', totalChunks);
+                formData.append('chunk', chunk);
 
-            try {
                 const response = await new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
-                    xhr.open('POST', `${base}/upload`);
+                    xhr.open('POST', `${activeApiBase}/upload-chunk`);
                     xhr.setRequestHeader('X-CSRF-TOKEN', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+                    
                     xhr.upload.onprogress = (e) => {
-                        if (e.lengthComputable && e.total > 0) {
-                            const percent = Math.min(99, Math.max(1, Math.round((e.loaded / e.total) * 100)));
+                        if (e.lengthComputable) {
+                            const currentUploaded = uploadedBytes + e.loaded;
+                            const percent = Math.min(99, Math.round((currentUploaded / totalSize) * 100));
+                            
                             if (elements.progressPercent) elements.progressPercent.innerText = percent + "%";
                             if (elements.progressFill) elements.progressFill.style.width = percent + "%";
                             
-                            // Stats calculation
                             const elapsed = (Date.now() - startTime) / 1000;
-                            const speed = e.loaded / (elapsed || 0.1);
-                            const remaining = e.total - e.loaded;
+                            const speed = currentUploaded / (elapsed || 0.1);
+                            const remaining = totalSize - currentUploaded;
                             const eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
                             
                             if (elements.statSpeed) elements.statSpeed.innerText = formatFileSize(speed) + "/s";
-                            if (elements.statTransferred) elements.statTransferred.innerText = `${formatFileSize(e.loaded)} / ${formatFileSize(e.total)}`;
-                            
+                            if (elements.statTransferred) elements.statTransferred.innerText = `${formatFileSize(currentUploaded)} / ${formatFileSize(totalSize)}`;
                             if (elements.statEta) {
                                 if (eta > 0) {
                                     const mins = Math.floor(eta / 60);
@@ -530,40 +535,28 @@
                                     elements.statEta.innerText = "Finishing...";
                                 }
                             }
-                            
-                            if (elements.statFiles) {
-                                const filesDone = Math.floor((e.loaded / e.total) * files.length);
-                                elements.statFiles.innerText = `${filesDone} / ${files.length}`;
-                            }
                         }
                     };
-                    xhr.onload = () => resolve(new Response(xhr.responseText, {
-                        status: xhr.status,
-                        statusText: xhr.statusText,
-                        headers: { 'content-type': xhr.getResponseHeader('content-type') || '' }
-                    }));
-                    xhr.onerror = () => reject(new Error('Upload request failed'));
-                    xhr.onabort = () => reject(new Error('Upload request was aborted'));
-                    xhr.send(buildUploadFormData(files));
+
+                    xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status }));
+                    xhr.onerror = () => reject(new Error('Chunk upload failed'));
+                    xhr.send(formData);
                 });
 
-                if (response.ok) {
-                    activeApiBase = base;
-                    return response;
-                }
-
-                lastResponse = response;
-                if (!shouldRetryWithFallback(response.status)) {
-                    activeApiBase = base;
-                    return response;
-                }
-            } catch (error) {
-                lastError = error;
+                if (!response.ok) throw new Error('Failed to upload chunk');
+                uploadedBytes += (end - start);
             }
         }
 
-        if (lastResponse) return lastResponse;
-        throw lastError || new Error('Upload request failed');
+        // Finalize
+        const finalizeResp = await apiFetch('/finalize-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: jobId })
+        });
+
+        if (!finalizeResp.ok) throw new Error('Finalize failed');
+        return finalizeResp;
     }
     
     let state = {
@@ -1147,7 +1140,7 @@
         updateView();
 
         try {
-            const response = await uploadWithFallback(state.files);
+            const response = await uploadWithChunks(state.files);
             if (!response.ok) {
                 state.status = 'error';
                 elements.errorMessage.innerText = await readErrorMessage(response, 'Upload failed');
