@@ -408,9 +408,19 @@ class StudioController extends Controller
                 copy($source['path'], $subDir . '/' . $source['name']);
             }
 
-            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($subDir, \FilesystemIterator::SKIP_DOTS));
-            $totalExtracted = iterator_count($iterator);
-            $iterator->rewind(); 
+            if (!File::exists($subDir)) {
+                Log::warning("Scanning subDir missing for job {$jobId}: {$subDir}");
+                continue;
+            }
+
+            try {
+                $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($subDir, \FilesystemIterator::SKIP_DOTS));
+                $totalExtracted = iterator_count($iterator);
+                $iterator->rewind(); 
+            } catch (\Exception $e) {
+                Log::error("Failed to iterate scan directory for job {$jobId}: " . $e->getMessage());
+                continue;
+            }
             
             $currentExtractedSize = 0;
             $lastReportedProgress = -1;
@@ -697,9 +707,20 @@ class StudioController extends Controller
             $workDir = $this->storagePath . '/' . $jobId . '/temp_' . $index;
             File::copyDirectory($sourceExtractPath, $workDir);
 
-            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($workDir, \FilesystemIterator::SKIP_DOTS));
-            $totalWorkFiles = iterator_count($iterator);
-            $iterator->rewind();
+            if (!File::exists($workDir)) {
+                Log::error("Repackaging workDir missing for job {$jobId}: {$workDir}");
+                continue;
+            }
+
+            try {
+                $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($workDir, \FilesystemIterator::SKIP_DOTS));
+                $totalWorkFiles = iterator_count($iterator);
+                $iterator->rewind();
+            } catch (\Exception $e) {
+                Log::error("Failed to iterate rebrand directory for job {$jobId}: " . $e->getMessage());
+                continue;
+            }
+
             $lastRebrandProgress = -1;
 
             $counter = 0;
