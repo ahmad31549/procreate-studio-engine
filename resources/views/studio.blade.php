@@ -206,9 +206,15 @@
         <div class="storage-bar-container">
             <div id="storageBarFill" class="storage-bar-fill storage-status-normal"></div>
         </div>
+        <div id="cleanupProgressWrap" style="display: none; margin-top: 12px;">
+            <div class="progress-track" style="margin: 8px 0; height: 6px;">
+                <div id="cleanupProgressFill" class="progress-bar" style="width: 0%; height: 100%; background: #ef4444;"></div>
+            </div>
+            <p id="cleanupFeedback" class="drop-subtext" style="font-size: 0.65rem; color: #ef4444; font-weight: 700;"></p>
+        </div>
     </div>
     <div style="text-align: right;">
-        <button type="button" class="btn-clear-mem" id="clearMemoryBtn">
+        <button type="button" class="btn-clear-mem" id="cleanupBtn">
             <span style="font-size: 1.1rem; vertical-align: middle; margin-right: 4px;">🧹</span> 
             CLEAR MEMORY
         </button>
@@ -477,23 +483,7 @@
     </section>
 </div>
 
-<!-- Engine Storage Usage Section -->
-<div class="studio-card fade-in" style="max-width: 1000px; margin: 24px auto 32px; padding: 20px 24px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; gap: 24px;">
-        <div style="flex: 1;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <h3 style="margin: 0; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Engine Storage Usage</h3>
-                <span id="storageUsageLabel" style="font-size: 0.85rem; font-weight: 800; color: var(--text-main);">0 GB / 20 GB</span>
-            </div>
-            <div class="progress-track" style="margin: 0; height: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; overflow: hidden;">
-                <div id="storageBarFill" class="progress-bar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.5s ease, background 0.5s ease;"></div>
-            </div>
-        </div>
-        <button type="button" id="clearMemoryBtn" class="btn btn-secondary" style="height: 52px; padding: 0 24px; display: flex; align-items: center; gap: 10px; border-color: rgba(239, 68, 68, 0.3); color: #ef4444; font-weight: 800; white-space: nowrap; border-radius: 12px;">
-            <span style="font-size: 1.1rem;">🧹</span> CLEAR MEMORY
-        </button>
-    </div>
-</div>
+
 
 @endsection
 
@@ -1440,48 +1430,7 @@
         updateView();
     };
 
-    elements.cleanupBtn.onclick = async () => {
-        elements.cleanupBtn.disabled = true;
-        elements.cleanupProgressWrap.style.display = 'block';
-        elements.cleanupFeedback.innerText = "System maintenance in progress...";
-        
-        // Reset state & front-end UI immediately
-        state = { files: [], jobId: null, status: 'idle', manifest: null, outputs: [], bundle: null, storeName: '', finalZipName: '' };
-        
-        // Clear input fields
-        if (document.getElementById('authorNameIn')) document.getElementById('authorNameIn').value = '';
-        if (document.getElementById('storeNameIn')) document.getElementById('storeNameIn').value = '';
-        if (document.getElementById('sigInput')) document.getElementById('sigInput').value = '';
-        if (document.getElementById('sigFileName')) document.getElementById('sigFileName').value = '';
-        if (document.getElementById('clearSig')) document.getElementById('clearSig').style.display = 'none';
-        if (document.getElementById('picInput')) document.getElementById('picInput').value = '';
-        if (document.getElementById('picFileName')) document.getElementById('picFileName').value = '';
-        if (document.getElementById('clearPic')) document.getElementById('clearPic').style.display = 'none';
-        if (document.getElementById('linkUploadInput')) document.getElementById('linkUploadInput').value = '';
-        
-        updateView();
-
-        try {
-            const resp = await apiFetch(`/maintenance/cleanup-storage?deep_clean=true`, { method: 'POST' });
-            if (!resp.ok) throw new Error(await readErrorMessage(resp, "Cleanup failed"));
-            elements.cleanupProgressFill.style.width = "100%";
-            elements.cleanupFeedback.innerText = "Memory and temporary records cleared.";
-        } catch (e) {
-            elements.cleanupFeedback.innerText = e.message || "System error during maintenance.";
-        } finally {
-            elements.cleanupBtn.disabled = false;
-            setTimeout(() => {
-                elements.cleanupProgressWrap.style.display = 'none';
-                elements.cleanupProgressFill.style.width = "0%";
-            }, 3000);
-        }
-    };
-
     // --- Storage Management Logic ---
-    const storageUsageLabel = document.getElementById('storageUsageLabel');
-    const storageBarFill = document.getElementById('storageBarFill');
-    const clearMemoryBtn = document.getElementById('clearMemoryBtn');
-
     async function refreshStorageStats() {
         try {
             const resp = await apiFetch('/storage/stats');
@@ -1490,23 +1439,16 @@
                 const usedGB = (data.used_bytes / (1024 * 1024 * 1024)).toFixed(2);
                 const totalGB = (data.total_mb / 1024).toFixed(0);
                 
-                if (storageUsageLabel) storageUsageLabel.innerText = `${usedGB} GB / ${totalGB} GB (${data.percent}%)`;
-                if (storageBarFill) {
-                    storageBarFill.style.width = data.percent + "%";
-                    
-                    // Remove old status classes
-                    storageBarFill.classList.remove('storage-status-normal', 'storage-status-warning', 'storage-status-full');
-                    
-                    // Add new status class
-                    if (data.status === 'full') storageBarFill.classList.add('storage-status-full');
-                    else if (data.status === 'warning') storageBarFill.classList.add('storage-status-warning');
-                    else storageBarFill.classList.add('storage-status-normal');
-                }
-
-                // If storage is full, disable upload buttons
-                if (data.status === 'full') {
-                    if (elements.launchBtn) elements.launchBtn.disabled = true;
-                    if (linkUploadBtn) linkUploadBtn.disabled = true;
+                const label = document.getElementById('storageUsageLabel');
+                const bar = document.getElementById('storageBarFill');
+                
+                if (label) label.innerText = `${usedGB} GB / ${totalGB} GB (${data.percent}%)`;
+                if (bar) {
+                    bar.style.width = data.percent + "%";
+                    bar.classList.remove('storage-status-normal', 'storage-status-warning', 'storage-status-full');
+                    if (data.status === 'full') bar.classList.add('storage-status-full');
+                    else if (data.status === 'warning') bar.classList.add('storage-status-warning');
+                    else bar.classList.add('storage-status-normal');
                 }
             }
         } catch (e) {
@@ -1514,39 +1456,57 @@
         }
     }
 
-    if (clearMemoryBtn) {
-        clearMemoryBtn.onclick = async () => {
+    if (elements.cleanupBtn) {
+        elements.cleanupBtn.onclick = async () => {
             if (!confirm("Are you sure you want to clear all working memory? This will delete all uploaded and processed files.")) return;
             
-            const originalText = clearMemoryBtn.innerHTML;
-            clearMemoryBtn.disabled = true;
-            clearMemoryBtn.innerHTML = "🧹 CLEARING...";
+            elements.cleanupBtn.disabled = true;
+            elements.cleanupBtn.innerHTML = "🧹 CLEARING...";
             
+            if (elements.cleanupProgressWrap) elements.cleanupProgressWrap.style.display = 'block';
+            if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = "Cleaning system memory...";
+            
+            // Reset state & front-end UI immediately
+            state = { files: [], jobId: null, status: 'idle', manifest: null, outputs: [], bundle: null, storeName: '', finalZipName: '' };
+            
+            // Clear input fields
+            const inputs = ['authorNameIn', 'storeNameIn', 'sigInput', 'sigFileName', 'picInput', 'picFileName', 'linkUploadInput'];
+            inputs.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            ['clearSig', 'clearPic'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            
+            updateView();
+
             try {
                 const resp = await apiFetch(`/maintenance/cleanup-storage`, { method: 'POST' });
-                if (resp.ok) {
-                    refreshStorageStats();
-                    // Reset UI to idle if currently processing
-                    if (['uploading', 'scanning', 'processing'].includes(state.status)) {
-                        state.status = 'idle';
-                        updateView();
-                    }
-                    alert("Memory cleared successfully.");
-                } else {
-                    alert("Failed to clear memory.");
-                }
+                if (!resp.ok) throw new Error(await readErrorMessage(resp, "Cleanup failed"));
+                
+                if (elements.cleanupProgressFill) elements.cleanupProgressFill.style.width = "100%";
+                if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = "Memory cleared successfully.";
+                
+                refreshStorageStats();
             } catch (e) {
-                alert("Error during memory cleanup.");
+                if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = e.message || "Error during cleanup.";
             } finally {
-                clearMemoryBtn.disabled = false;
-                clearMemoryBtn.innerHTML = originalText;
+                elements.cleanupBtn.disabled = false;
+                elements.cleanupBtn.innerHTML = '<span style="font-size: 1.1rem; vertical-align: middle; margin-right: 4px;">🧹</span> CLEAR MEMORY';
+                
+                setTimeout(() => {
+                    if (elements.cleanupProgressWrap) elements.cleanupProgressWrap.style.display = 'none';
+                    if (elements.cleanupProgressFill) elements.cleanupProgressFill.style.width = "0%";
+                }, 3000);
             }
         };
     }
 
-    // Start Polling every 10 seconds
-    setInterval(refreshStorageStats, 10000);
-    refreshStorageStats(); // Initial check
+    // Start Polling
+    setInterval(refreshStorageStats, 20000);
+    refreshStorageStats(); 
 
     updateView();
 </script>
