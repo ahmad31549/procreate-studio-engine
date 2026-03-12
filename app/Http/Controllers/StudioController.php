@@ -419,17 +419,19 @@ class StudioController extends Controller
             $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates(pathinfo($source['name'], PATHINFO_FILENAME)));
             $assetCount = 0;
 
-            foreach ($iterator as $fIndex => $f) {
+            $counter = 0;
+            foreach ($iterator as $f) {
                 if ($f->isDir()) continue;
                 
                 // Sub-progress within this source file
-                $subProgress = ($fIndex / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
+                $subProgress = ($counter / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
                 $newProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90 + $subProgress);
                 
                 if ($newProgress > $lastReportedProgress) {
                     $this->updateJob($jobId, ['progress' => min(95, $newProgress)]);
                     $lastReportedProgress = $newProgress;
                 }
+                $counter++;
 
                 $currentExtractedSize += $f->getSize();
                 $realPath = $f->getRealPath();
@@ -700,7 +702,8 @@ class StudioController extends Controller
             $iterator->rewind();
             $lastRebrandProgress = -1;
 
-            foreach ($iterator as $fIndex => $f) {
+            $counter = 0;
+            foreach ($iterator as $f) {
                 if ($f->isDir()) continue;
                 
                 if ($this->shouldRewriteMetadataFile($f)) {
@@ -708,13 +711,14 @@ class StudioController extends Controller
                 }
 
                 // Sub-progress during rebranding
-                $subProgress = ($fIndex / ($totalWorkFiles ?: 1)) * (85 / ($total ?: 1));
+                $subProgress = ($counter / ($totalWorkFiles ?: 1)) * (85 / ($total ?: 1));
                 $newProgress = 5 + (int)(($index / ($total ?: 1)) * 85 + $subProgress);
                 
                 if ($newProgress > $lastRebrandProgress) {
                     $this->updateJob($jobId, ['progress' => min(94, $newProgress)]);
                     $lastRebrandProgress = $newProgress;
                 }
+                $counter++;
             }
 
             $this->replaceBrandImagesInDirectory($workDir, $authorPicturePath, $signaturePath);
