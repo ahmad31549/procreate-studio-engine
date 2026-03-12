@@ -53,18 +53,26 @@
   border-color: #f97316;
   background: #f97316;
   color: #000;
-  box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
+  box-shadow: 0 0 30px rgba(249, 115, 22, 0.6);
+  transform: scale(1.1);
 }
 .step.completed .step-circle {
   border-color: #10b981;
   background: #10b981;
   color: #000;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
 }
 .step.clickable { cursor: pointer; }
 .step.clickable:hover .step-circle {
   border-color: #f97316;
-  transform: translateY(-2px);
+  transform: translateY(-4px) scale(1.05);
 }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: slideUp 0.6s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+.section-animate { animation: slideUp 0.8s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
 .btn-nav {
     display: inline-flex;
     align-items: center;
@@ -98,9 +106,33 @@
   50% { opacity: 1; transform: scale(1.05); }
   100% { opacity: 0.6; transform: scale(1); }
 }
-.storage-status-normal { background: #10b981 !important; }
-.storage-status-warning { background: #f59e0b !important; }
-.storage-status-full { background: #ef4444 !important; }
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(249, 115, 22, 0.5); }
+  50% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.8); }
+}
+.progress-bar {
+  background: linear-gradient(90deg, #f97316, #fb923c, #f97316);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite linear;
+  position: relative;
+}
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.5);
+  animation: glow 2s infinite ease-in-out;
+}
+#progressPercent {
+  text-shadow: 0 0 30px rgba(249, 115, 22, 0.3);
+  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.stat-box { transition: transform 0.3s ease, background 0.3s ease; }
+.stat-box:hover { transform: translateY(-5px) scale(1.02); background: rgba(255,255,255,0.05) !important; }
 .step.active .step-label { color: #f97316; }
 .step.completed .step-label { color: #10b981; }
 
@@ -778,6 +810,10 @@
                 elements.stageTitle.innerText = "Applying Rebrand...";
                 elements.stageMessage.innerText = "Injecting new identity and repackaging files.";
             }
+
+            // Reset progress UI if we just entered a processing state
+            if (elements.progressPercent) elements.progressPercent.innerText = "1%";
+            if (elements.progressFill) elements.progressFill.style.width = "1%";
         } else if (state.status === 'uploaded') {
             // Step 2 starts
             s1.classList.add('completed');
@@ -1253,6 +1289,7 @@
         if (elements.stageMessage) elements.stageMessage.innerText = "Requesting remote node to secure the asset. This may take a moment depending on file size.";
 
         try {
+            pollStatus();
             const response = await apiFetch('/upload-url', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1260,6 +1297,7 @@
             });
 
             if (!response.ok) {
+                clearInterval(pollInterval);
                 state.status = 'error';
                 elements.errorMessage.innerText = await readErrorMessage(response, 'Cloud import failed');
                 updateView();
@@ -1271,6 +1309,7 @@
             state.status = 'uploaded';
             updateView();
         } catch (error) {
+            clearInterval(pollInterval);
             state.status = 'error';
             elements.errorMessage.innerText = error instanceof Error ? error.message : 'Cloud fetch request failed';
             updateView();
@@ -1286,9 +1325,12 @@
         try {
             const formData = new FormData();
             formData.append('blocked_keywords', '[]');
-            const resp = await apiFetch(`/jobs/${state.jobId}/scan`, { method: 'POST', body: formData });
-            if (!resp.ok) throw new Error(await readErrorMessage(resp, "Branding scan failed to start"));
             pollStatus();
+            const resp = await apiFetch(`/jobs/${state.jobId}/scan`, { method: 'POST', body: formData });
+            if (!resp.ok) {
+                clearInterval(pollInterval);
+                throw new Error(await readErrorMessage(resp, "Branding scan failed to start"));
+            }
         } catch (e) {
             state.status = 'error';
             elements.errorMessage.innerText = e.message;
@@ -1336,9 +1378,12 @@
                 formData.append('author_pic_file', picInput.files[0]);
             }
 
-            const resp = await apiFetch(`/jobs/${state.jobId}/rebrand`, { method: 'POST', body: formData });
-            if (!resp.ok) throw new Error(await readErrorMessage(resp, "Repackaging process failed"));
             pollStatus();
+            const resp = await apiFetch(`/jobs/${state.jobId}/rebrand`, { method: 'POST', body: formData });
+            if (!resp.ok) {
+                clearInterval(pollInterval);
+                throw new Error(await readErrorMessage(resp, "Repackaging process failed"));
+            }
         } catch (e) {
             state.status = 'error';
             elements.errorMessage.innerText = e.message;

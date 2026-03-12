@@ -371,6 +371,12 @@ class StudioController extends Controller
         }
         mkdir($extractRoot, 0755, true);
 
+        $this->updateJob($jobId, [
+            'status' => 'scanning',
+            'progress' => 2,
+            'progress_message' => 'Initializing intelligent scan...'
+        ]);
+
         $manifest = ['assets' => [], 'source_files' => [], 'detected_authors' => [], 'rename_candidates' => []];
         $allAuthorTags = [];
         $allRenameCandidates = [];
@@ -379,7 +385,15 @@ class StudioController extends Controller
         $imgExts = ['png', 'jpg', 'jpeg', 'webp'];
 
         $sourceFiles = $job->files ?: [];
-        foreach ($sourceFiles as $source) {
+        $totalFiles = count($sourceFiles);
+
+        foreach ($sourceFiles as $index => $source) {
+            $currentProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90);
+            $this->updateJob($jobId, [
+                'progress' => $currentProgress,
+                'progress_message' => "Scanning " . ($index + 1) . "/$totalFiles: " . $source['name']
+            ]);
+
             $subDir = $extractRoot . '/' . pathinfo($source['name'], PATHINFO_FILENAME);
             if (!file_exists($subDir)) mkdir($subDir, 0755, true);
 
@@ -395,22 +409,26 @@ class StudioController extends Controller
             }
 
             $extractedFiles = File::allFiles($subDir);
+            $totalExtracted = count($extractedFiles);
             $currentExtractedSize = 0;
-            foreach ($extractedFiles as $f) {
-                $currentExtractedSize += $f->getSize();
-            }
-            $totalExtractedSize += $currentExtractedSize;
-
-            if ($totalExtractedSize > 10737418240) { // 10GB Total Limit
-                return response()->json(['error' => 'Total content exceeds 10GB limit.'], 413);
-            }
-
+            
             $authorsInFile = [];
             $renameCandidatesInFile = $this->extractAuthorCandidates($source['name']);
             $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates(pathinfo($source['name'], PATHINFO_FILENAME)));
             $assetCount = 0;
 
-            foreach ($extractedFiles as $f) {
+            foreach ($extractedFiles as $fIndex => $f) {
+                // Sub-progress within this source file
+                $subProgress = ($fIndex / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
+                $newProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90 + $subProgress);
+                
+                // Only update every 1% change or every 10 files to avoid over-writing job.json
+                if (!isset($lastReportedProgress) || $newProgress > $lastReportedProgress || $fIndex % 10 === 0) {
+                    $this->updateJob($jobId, ['progress' => min(95, $newProgress)]);
+                    $lastReportedProgress = $newProgress;
+                }
+
+                $currentExtractedSize += $f->getSize();
                 $realPath = $f->getRealPath();
                 $name = $f->getFilename();
                 $ext = strtolower($f->getExtension());
@@ -439,6 +457,12 @@ class StudioController extends Controller
                         $authorsInFile = array_merge($authorsInFile, $this->extractBinaryPlistAuthorCandidates($content));
                     }
                 }
+            }
+
+            $totalExtractedSize += $currentExtractedSize;
+
+            if ($totalExtractedSize > 10737418240) { // 10GB Total Limit
+                return response()->json(['error' => 'Total content exceeds 10GB limit.'], 413);
             }
 
             $authorsInFile = $this->uniqueValues($authorsInFile);
@@ -560,6 +584,12 @@ class StudioController extends Controller
             return response()->json(['error' => 'Job not found'], 404);
         }
 
+        $this->updateJob($jobId, [
+            'status' => 'processing',
+            'progress' => 2,
+            'progress_message' => 'Preparing rebranding engine...'
+        ]);
+
         $userDir = $this->storagePath . '/users/' . Auth::id();
         if (!file_exists($userDir)) @mkdir($userDir, 0755, true);
 
@@ -644,7 +674,11 @@ class StudioController extends Controller
         
         foreach ($job->files as $index => $source) {
             Log::info("Rebranding file " . ($index+1) . " of $total: " . $source['name']);
-            $this->updateJob($jobId, ['progress_message' => "Processing " . ($index+1) . "/$total..."]);
+            $currentProgress = 5 + (int)(($index / ($total ?: 1)) * 85);
+            $this->updateJob($jobId, [
+                'progress' => $currentProgress,
+                'progress_message' => "Rebranding " . ($index+1) . "/$total: " . $source['name']
+            ]);
             
             $sourceStem = pathinfo($source['name'], PATHINFO_FILENAME);
             $sourceExtractPath = $this->storagePath . '/' . $jobId . '/work/' . $sourceStem;
@@ -659,9 +693,19 @@ class StudioController extends Controller
             File::copyDirectory($sourceExtractPath, $workDir);
 
             $allFiles = File::allFiles($workDir);
-            foreach ($allFiles as $f) {
+            $totalWorkFiles = count($allFiles);
+            foreach ($allFiles as $fIndex => $f) {
                 if ($this->shouldRewriteMetadataFile($f)) {
                     $this->rewriteMetadataFile($f->getRealPath(), $authorReplacements);
+                }
+
+                // Sub-progress during rebranding
+                $subProgress = ($fIndex / ($totalWorkFiles ?: 1)) * (85 / ($total ?: 1));
+                $newProgress = 5 + (int)(($index / ($total ?: 1)) * 85 + $subProgress);
+                
+                if (!isset($lastRebrandProgress) || $newProgress > $lastRebrandProgress || $fIndex % 10 === 0) {
+                    $this->updateJob($jobId, ['progress' => min(94, $newProgress)]);
+                    $lastRebrandProgress = $newProgress;
                 }
             }
 
@@ -680,6 +724,11 @@ class StudioController extends Controller
             
             File::deleteDirectory($workDir);
         }
+
+        $this->updateJob($jobId, [
+            'progress' => 95,
+            'progress_message' => "Zipping final bundle..."
+        ]);
 
         $bundle = count($rebrandedFiles) > 0
             ? $this->buildOutputBundle($jobId, $rebrandedFiles, $finalZipName . '.zip')
